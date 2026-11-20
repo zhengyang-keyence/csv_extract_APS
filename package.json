@@ -1,0 +1,8 @@
+{
+  "name": "csv-extractor",
+  "productName": "CSV Extractor",
+  "version": "1.0.0",
+  "description": "A local CSV extraction tool",
+  "author": "CSV Extractor",
+  "main": "main.js"
+}
