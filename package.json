@@ -4,5 +4,8 @@
   "version": "1.0.0",
   "description": "A local CSV extraction tool",
   "author": "CSV Extractor",
-  "main": "main.js"
+  "main": "main.js",
+  "devDependencies": {
+    "electron": "*"
+  }
 }
