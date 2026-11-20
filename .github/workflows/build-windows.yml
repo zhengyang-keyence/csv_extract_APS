@@ -1,0 +1,35 @@
+name: Build Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Get repository files
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install build tools
+        run: npm install --no-save electron@latest @electron-forge/cli@latest @electron-forge/maker-squirrel@latest electron-squirrel-startup@latest
+
+      - name: Build Windows installer
+        run: npx electron-forge make --platform=win32 --arch=x64
+
+      - name: Save installer for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSV-Extractor-Windows-Installer
+          path: out/make/**/*.exe
