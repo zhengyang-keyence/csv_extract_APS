@@ -89,13 +89,13 @@
       </label>
     </div>
     <p class="note">Data rows start at 1; the header row is not counted.</p>
-    <label>Columns to skip (optional)
-      <input id="skipCols" placeholder="Example: C, F, H">
+    <label>Column skip rule (optional)
+      <input id="skipRule" placeholder="Example: 1 or C, F, H">
     </label>
-    <label>Columns to skip after each kept column
-      <input id="skipAfter" type="number" min="0" value="0">
-    </label>
-    <p class="note">Example: enter 1 to keep A, C, E... within the selected range.</p>
+    <p class="note">
+      Enter a number to skip that many columns after each kept column,
+      or enter specific column letters such as C, F, H.
+    </p>
     <button id="extract" disabled>Extract data</button>
     <div id="message" role="status"></div>
   </section>
@@ -114,9 +114,14 @@
   // Convert a spreadsheet column label (A, B, ..., AA) to zero-based index.
   function colIndex(label) {
     const text = label.trim().toUpperCase();
-    if (!/^[A-Z]+$/.test(text)) throw new Error("Use column letters, such as A or AA.");
+    if (!/^[A-Z]+$/.test(text)) {
+      throw new Error("Use column letters, such as A or AA.");
+    }
+
     let n = 0;
-    for (const ch of text) n = n * 26 + ch.charCodeAt(0) - 64;
+    for (const ch of text) {
+      n = n * 26 + ch.charCodeAt(0) - 64;
+    }
     return n - 1;
   }
 
@@ -124,7 +129,9 @@
   function parseCSV(text) {
     text = text.replace(/^\uFEFF/, "");
     const result = [];
-    let row = [], field = "", quoted = false;
+    let row = [];
+    let field = "";
+    let quoted = false;
 
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
@@ -141,46 +148,59 @@
       } else if (ch === '"' && field.length === 0) {
         quoted = true;
       } else if (ch === ",") {
-        row.push(field); field = "";
+        row.push(field);
+        field = "";
       } else if (ch === "\n" || ch === "\r") {
         if (ch === "\r" && text[i + 1] === "\n") i++;
-        row.push(field); result.push(row);
-        row = []; field = "";
+        row.push(field);
+        result.push(row);
+        row = [];
+        field = "";
       } else {
         field += ch;
       }
     }
 
-    if (quoted) throw new Error("The CSV has an unclosed quotation mark.");
+    if (quoted) {
+      throw new Error("The CSV has an unclosed quotation mark.");
+    }
+
     if (field.length || row.length) {
       row.push(field);
       result.push(row);
     }
+
     return result;
   }
 
   function csvCell(value) {
     const s = String(value ?? "");
-    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    return /[",\r\n]/.test(s)
+      ? '"' + s.replace(/"/g, '""') + '"'
+      : s;
   }
 
   function showTable(data) {
     const table = document.createElement("table");
+
     data.forEach((row, rowIndex) => {
       const tr = document.createElement("tr");
+
       row.forEach(value => {
         const cell = document.createElement(rowIndex === 0 ? "th" : "td");
         cell.textContent = value ?? "";
         tr.appendChild(cell);
       });
+
       table.appendChild(tr);
     });
-    const container = document.getElementById("preview");
-    container.replaceChildren(table);
+
+    document.getElementById("preview").replaceChildren(table);
   }
 
   document.getElementById("file").addEventListener("change", async event => {
     const file = event.target.files[0];
+
     rows = null;
     extractedRows = null;
     document.getElementById("extract").disabled = true;
@@ -192,16 +212,23 @@
     try {
       const text = await file.text();
       rows = parseCSV(text);
-      if (!rows.length || !rows[0].length) throw new Error("The CSV appears to be empty.");
+
+      if (!rows.length || !rows[0].length) {
+        throw new Error("The CSV appears to be empty.");
+      }
 
       const width = Math.max(...rows.map(r => r.length));
+
       const lastColumn = (() => {
-        let n = width, name = "";
+        let n = width;
+        let name = "";
+
         while (n) {
           n--;
-          name = String.fromCharCode(65 + n % 26) + name;
+          name = String.fromCharCode(65 + (n % 26)) + name;
           n = Math.floor(n / 26);
         }
+
         return name;
       })();
 
@@ -218,61 +245,98 @@
 
   document.getElementById("extract").addEventListener("click", () => {
     try {
-      if (!rows) throw new Error("Choose a CSV file first.");
+      if (!rows) {
+        throw new Error("Choose a CSV file first.");
+      }
 
       const firstCol = colIndex(document.getElementById("startCol").value);
       const lastCol = colIndex(document.getElementById("endCol").value);
       const firstRow = Number(document.getElementById("startRow").value);
       const lastRow = Number(document.getElementById("endRow").value);
 
-      if (firstCol > lastCol) throw new Error("First column must come before last column.");
-      if (lastCol >= Math.max(...rows.map(r => r.length))) {
+      if (firstCol > lastCol) {
+        throw new Error("First column must come before last column.");
+      }
+
+      const fileWidth = Math.max(...rows.map(r => r.length));
+      if (lastCol >= fileWidth) {
         throw new Error("The selected last column is outside the file's columns.");
       }
-      if (!Number.isInteger(firstRow) || !Number.isInteger(lastRow) ||
-          firstRow < 1 || lastRow < firstRow) {
-        throw new Error("Enter valid data row numbers; the first row must not exceed the last.");
+
+      if (
+        !Number.isInteger(firstRow) ||
+        !Number.isInteger(lastRow) ||
+        firstRow < 1 ||
+        lastRow < firstRow
+      ) {
+        throw new Error(
+          "Enter valid data row numbers; the first row must not exceed the last."
+        );
       }
 
-      const skipped = new Set(
-        document.getElementById("skipCols").value
-          .split(/[,;\s]+/).filter(Boolean).map(colIndex)
-      );
+      // One input supports either:
+      // - a number, such as 1 or 2, for repeated skipping
+      // - column letters, such as C, F, H, for specific columns to skip
+      const rule = document.getElementById("skipRule").value.trim().toUpperCase();
+      let skipped = new Set();
+      let skipAfter = 0;
 
-      const skipAfter = Number(document.getElementById("skipAfter").value);
-      
-      if (!Number.isInteger(skipAfter) || skipAfter < 0) {
-        throw new Error("The number of columns to skip must be 0 or greater.");
+      if (/^\d+$/.test(rule)) {
+        skipAfter = Number(rule);
+      } else if (rule) {
+        const letters = rule.split(/[,;\s]+/).filter(Boolean);
+        skipped = new Set(letters.map(colIndex));
       }
-      
-      const columns = [];
+
+      const patternStart = document.getElementById("patternStart").value;
       const keepEvery = skipAfter + 1;
-      
+      const offset = patternStart === "skip" ? skipAfter : 0;
+
+      const columns = [];
+
       for (let c = firstCol; c <= lastCol; c++) {
         const positionInRange = c - firstCol;
-      
-        if (positionInRange % keepEvery === 0 && !skipped.has(c)) {
+        const matchesPattern =
+          positionInRange >= offset &&
+          (positionInRange - offset) % keepEvery === 0;
+
+        if (matchesPattern && !skipped.has(c)) {
           columns.push(c);
         }
       }
-      if (!columns.length) throw new Error("All selected columns were skipped.");
+
+      if (!columns.length) {
+        throw new Error("No columns remain after applying the skip rule.");
+      }
 
       const header = rows[0];
       const data = rows.slice(firstRow, lastRow + 1);
+
       extractedRows = [
         columns.map(c => header[c] ?? ""),
         ...data.map(row => columns.map(c => row[c] ?? ""))
       ];
 
       showTable(extractedRows.slice(0, 21));
+
       document.getElementById("resultInfo").textContent =
         `${data.length} rows and ${columns.length} columns` +
         (data.length > 20 ? " (showing first 20 rows)." : ".");
 
-      const csv = extractedRows.map(row => row.map(csvCell).join(",")).join("\r\n");
-      const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+      const csv = extractedRows
+        .map(row => row.map(csvCell).join(","))
+        .join("\r\n");
+
+      const blob = new Blob(["\uFEFF", csv], {
+        type: "text/csv;charset=utf-8"
+      });
+
       const link = document.getElementById("download");
-      if (link.dataset.url) URL.revokeObjectURL(link.dataset.url);
+
+      if (link.dataset.url) {
+        URL.revokeObjectURL(link.dataset.url);
+      }
+
       link.href = URL.createObjectURL(blob);
       link.dataset.url = link.href;
 
@@ -285,5 +349,3 @@
     }
   });
 </script>
-</body>
-</html>
