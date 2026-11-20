@@ -92,10 +92,13 @@
     <label>Column skip rule (optional)
       <input id="skipRule" placeholder="Example: 1 or C, F, H">
     </label>
-    <p class="note">
-      Enter a number to skip that many columns after each kept column,
-      or enter specific column letters such as C, F, H.
-    </p>
+    
+    <label>Pattern starts with
+      <select id="patternStart">
+        <option value="keep">Keep the first column in the range</option>
+        <option value="skip">Skip the first column in the range</option>
+      </select>
+    </label>
     <button id="extract" disabled>Extract data</button>
     <div id="message" role="status"></div>
   </section>
