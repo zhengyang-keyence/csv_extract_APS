@@ -94,6 +94,10 @@
     </label>
     <button id="extract" disabled>Extract data</button>
     <div id="message" role="status"></div>
+    <label>Columns to skip after each kept column
+      <input id="skipAfter" type="number" min="0" value="0">
+    </label>
+    <p class="note">Example: enter 1 to keep A, C, E... within the selected range.</p>
   </section>
 
   <section class="card" id="resultSection" hidden>
@@ -235,9 +239,21 @@
           .split(/[,;\s]+/).filter(Boolean).map(colIndex)
       );
 
+      const skipAfter = Number(document.getElementById("skipAfter").value);
+      
+      if (!Number.isInteger(skipAfter) || skipAfter < 0) {
+        throw new Error("The number of columns to skip must be 0 or greater.");
+      }
+      
       const columns = [];
+      const keepEvery = skipAfter + 1;
+      
       for (let c = firstCol; c <= lastCol; c++) {
-        if (!skipped.has(c)) columns.push(c);
+        const positionInRange = c - firstCol;
+      
+        if (positionInRange % keepEvery === 0 && !skipped.has(c)) {
+          columns.push(c);
+        }
       }
       if (!columns.length) throw new Error("All selected columns were skipped.");
 
