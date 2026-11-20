@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSV Extractor</title>
+  <style>
+    body {
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 18px;
+      font: 16px/1.5 system-ui, sans-serif;
+      color: #222;
+    }
+    h1 { margin-bottom: 4px; }
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 18px 0;
+    }
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    label { display: block; font-weight: 600; }
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 9px;
+      margin-top: 5px;
+    }
+    button, .download {
+      display: inline-block;
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      background: #1769aa;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      margin: 8px 8px 0 0;
+    }
+    button:disabled { background: #999; cursor: not-allowed; }
+    .note { color: #555; font-size: 0.92em; }
+    .error { color: #b00020; font-weight: 600; }
+    .success { color: #176b36; font-weight: 600; }
+    .table-wrap { overflow: auto; max-height: 360px; }
+    table { border-collapse: collapse; font-size: 14px; }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 6px 9px;
+      text-align: left;
+      white-space: pre-wrap;
+    }
+    th { background: #f1f4f7; position: sticky; top: 0; }
+  </style>
+</head>
+<body>
+  <h1>CSV Extractor</h1>
+  <p>Choose rows and columns, preview the result, and download a new CSV.</p>
+
+  <section class="card">
+    <label for="file">Choose a CSV file</label>
+    <input id="file" type="file" accept=".csv,text/csv">
+    <p class="note">
+      The file is processed in this browser; its contents are not uploaded.
+      This version treats the first CSV row as column headers.
+    </p>
+    <div id="fileInfo" class="note"></div>
+  </section>
+
+  <section class="card">
+    <h2>Extraction settings</h2>
+    <div class="fields">
+      <label>First column
+        <input id="startCol" value="A">
+      </label>
+      <label>Last column
+        <input id="endCol" value="A">
+      </label>
+      <label>First data row
+        <input id="startRow" type="number" min="1" value="1">
+      </label>
+      <label>Last data row
+        <input id="endRow" type="number" min="1" value="1">
+      </label>
+    </div>
+    <p class="note">Data rows start at 1; the header row is not counted.</p>
+    <label>Columns to skip (optional)
+      <input id="skipCols" placeholder="Example: C, F, H">
+    </label>
+    <button id="extract" disabled>Extract data</button>
+    <div id="message" role="status"></div>
+  </section>
+
+  <section class="card" id="resultSection" hidden>
+    <h2>Preview</h2>
+    <div id="resultInfo" class="note"></div>
+    <div class="table-wrap" id="preview"></div>
+    <a id="download" class="download" download="extracted_data.csv">Download extracted CSV</a>
+  </section>
+
+<script>
+  let rows = null;
+  let extractedRows = null;
+
+  // Convert a spreadsheet column label (A, B, ..., AA) to zero-based index.
+  function colIndex(label) {
+    const text = label.trim().toUpperCase();
+    if (!/^[A-Z]+$/.test(text)) throw new Error("Use column letters, such as A or AA.");
+    let n = 0;
+    for (const ch of text) n = n * 26 + ch.charCodeAt(0) - 64;
+    return n - 1;
+  }
+
+  // Parse CSV, including quoted commas, escaped quotes, and quoted line breaks.
+  function parseCSV(text) {
+    text = text.replace(/^\uFEFF/, "");
+    const result = [];
+    let row = [], field = "", quoted = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+
+      if (quoted) {
+        if (ch === '"' && text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else if (ch === '"') {
+          quoted = false;
+        } else {
+          field += ch;
+        }
+      } else if (ch === '"' && field.length === 0) {
+        quoted = true;
+      } else if (ch === ",") {
+        row.push(field); field = "";
+      } else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); result.push(row);
+        row = []; field = "";
+      } else {
+        field += ch;
+      }
+    }
+
+    if (quoted) throw new Error("The CSV has an unclosed quotation mark.");
+    if (field.length || row.length) {
+      row.push(field);
+      result.push(row);
+    }
+    return result;
+  }
+
+  function csvCell(value) {
+    const s = String(value ?? "");
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function showTable(data) {
+    const table = document.createElement("table");
+    data.forEach((row, rowIndex) => {
+      const tr = document.createElement("tr");
+      row.forEach(value => {
+        const cell = document.createElement(rowIndex === 0 ? "th" : "td");
+        cell.textContent = value ?? "";
+        tr.appendChild(cell);
+      });
+      table.appendChild(tr);
+    });
+    const container = document.getElementById("preview");
+    container.replaceChildren(table);
+  }
+
+  document.getElementById("file").addEventListener("change", async event => {
+    const file = event.target.files[0];
+    rows = null;
+    extractedRows = null;
+    document.getElementById("extract").disabled = true;
+    document.getElementById("resultSection").hidden = true;
+    document.getElementById("message").textContent = "";
+
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      rows = parseCSV(text);
+      if (!rows.length || !rows[0].length) throw new Error("The CSV appears to be empty.");
+
+      const width = Math.max(...rows.map(r => r.length));
+      const lastColumn = (() => {
+        let n = width, name = "";
+        while (n) {
+          n--;
+          name = String.fromCharCode(65 + n % 26) + name;
+          n = Math.floor(n / 26);
+        }
+        return name;
+      })();
+
+      document.getElementById("endCol").value = lastColumn;
+      document.getElementById("endRow").value = Math.max(1, rows.length - 1);
+      document.getElementById("fileInfo").textContent =
+        `${file.name}: ${Math.max(0, rows.length - 1)} data rows, up to ${width} columns.`;
+      document.getElementById("extract").disabled = false;
+    } catch (error) {
+      document.getElementById("message").className = "error";
+      document.getElementById("message").textContent = error.message;
+    }
+  });
+
+  document.getElementById("extract").addEventListener("click", () => {
+    try {
+      if (!rows) throw new Error("Choose a CSV file first.");
+
+      const firstCol = colIndex(document.getElementById("startCol").value);
+      const lastCol = colIndex(document.getElementById("endCol").value);
+      const firstRow = Number(document.getElementById("startRow").value);
+      const lastRow = Number(document.getElementById("endRow").value);
+
+      if (firstCol > lastCol) throw new Error("First column must come before last column.");
+      if (lastCol >= Math.max(...rows.map(r => r.length))) {
+        throw new Error("The selected last column is outside the file's columns.");
+      }
+      if (!Number.isInteger(firstRow) || !Number.isInteger(lastRow) ||
+          firstRow < 1 || lastRow < firstRow) {
+        throw new Error("Enter valid data row numbers; the first row must not exceed the last.");
+      }
+
+      const skipped = new Set(
+        document.getElementById("skipCols").value
+          .split(/[,;\s]+/).filter(Boolean).map(colIndex)
+      );
+
+      const columns = [];
+      for (let c = firstCol; c <= lastCol; c++) {
+        if (!skipped.has(c)) columns.push(c);
+      }
+      if (!columns.length) throw new Error("All selected columns were skipped.");
+
+      const header = rows[0];
+      const data = rows.slice(firstRow, lastRow + 1);
+      extractedRows = [
+        columns.map(c => header[c] ?? ""),
+        ...data.map(row => columns.map(c => row[c] ?? ""))
+      ];
+
+      showTable(extractedRows.slice(0, 21));
+      document.getElementById("resultInfo").textContent =
+        `${data.length} rows and ${columns.length} columns` +
+        (data.length > 20 ? " (showing first 20 rows)." : ".");
+
+      const csv = extractedRows.map(row => row.map(csvCell).join(",")).join("\r\n");
+      const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+      const link = document.getElementById("download");
+      if (link.dataset.url) URL.revokeObjectURL(link.dataset.url);
+      link.href = URL.createObjectURL(blob);
+      link.dataset.url = link.href;
+
+      document.getElementById("resultSection").hidden = false;
+      document.getElementById("message").className = "success";
+      document.getElementById("message").textContent = "Extraction complete.";
+    } catch (error) {
+      document.getElementById("message").className = "error";
+      document.getElementById("message").textContent = error.message;
+    }
+  });
+</script>
+</body>
+</html>
