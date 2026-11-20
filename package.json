@@ -5,6 +5,9 @@
   "description": "A local CSV extraction tool",
   "author": "CSV Extractor",
   "main": "main.js",
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
+  },
   "devDependencies": {
     "electron": "*"
   }
